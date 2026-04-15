@@ -302,36 +302,35 @@ def _toolcall_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> di
     Passes enable_thinking=True so <think>...</think> are included.
     """
     try:
-        prompt_response_tokens = tokenizer.apply_chat_template(
+        prompt_response_tokens = list(tokenizer.apply_chat_template(
             row["messages"],
             tokenize=True,
             add_generation_prompt=False,
             enable_thinking=True,
-        )
+        ))
     except Exception:
-        # Fallback: template doesn't accept enable_thinking
-        prompt_response_tokens = tokenizer.apply_chat_template(
+        prompt_response_tokens = list(tokenizer.apply_chat_template(
             row["messages"],
             tokenize=True,
             add_generation_prompt=False,
-        )
+        ))
 
     labels = prompt_response_tokens.copy()
 
     if mask_prompt_loss:
         try:
-            prompt_tokens = tokenizer.apply_chat_template(
+            prompt_tokens = list(tokenizer.apply_chat_template(
                 row["messages"][:-1],
                 tokenize=True,
                 add_generation_prompt=True,
                 enable_thinking=True,
-            )
+            ))
         except Exception:
-            prompt_tokens = tokenizer.apply_chat_template(
+            prompt_tokens = list(tokenizer.apply_chat_template(
                 row["messages"][:-1],
                 tokenize=True,
                 add_generation_prompt=True,
-            )
+            ))
         labels[: len(prompt_tokens)] = [-100] * len(prompt_tokens)
         return {
             "input_ids": prompt_response_tokens,

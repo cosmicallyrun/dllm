@@ -191,14 +191,14 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
         return None
 
     try:
-        full_tokens = tokenizer.apply_chat_template(
+        full_tokens = list(tokenizer.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=False, enable_thinking=True,
-        )
+        ))
     except Exception:
         try:
-            full_tokens = tokenizer.apply_chat_template(
+            full_tokens = list(tokenizer.apply_chat_template(
                 messages, tokenize=True, add_generation_prompt=False,
-            )
+            ))
         except Exception:
             return None
 
@@ -206,13 +206,13 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
 
     if mask_prompt_loss:
         try:
-            prompt_tokens = tokenizer.apply_chat_template(
+            prompt_tokens = list(tokenizer.apply_chat_template(
                 messages[:-1], tokenize=True, add_generation_prompt=True, enable_thinking=True,
-            )
+            ))
         except Exception:
-            prompt_tokens = tokenizer.apply_chat_template(
+            prompt_tokens = list(tokenizer.apply_chat_template(
                 messages[:-1], tokenize=True, add_generation_prompt=True,
-            )
+            ))
         labels[: len(prompt_tokens)] = [-100] * len(prompt_tokens)
         return {"input_ids": full_tokens, "labels": labels, "prompt_len": len(prompt_tokens)}
 
