@@ -287,6 +287,7 @@ def train():
         dataset = dataset.map(
             partial(_joint_sft_map_fn, tokenizer=tokenizer, mask_prompt_loss=data_args.mask_prompt_loss),
             num_proc=1,
+            remove_columns=dataset["train"].column_names,
             desc="Tokenising joint dataset",
         )
         dataset = dataset.filter(
