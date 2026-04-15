@@ -263,8 +263,11 @@ from torch.nn.utils.rnn import pad_sequence as _pad_sequence
 
 class _SimpleSeq2SeqCollator:
     """Pads input_ids (with pad_token_id) and labels (with -100) into batch tensors."""
-    def __init__(self, pad_token_id: int):
+    def __init__(self, pad_token_id: int, eos_token_id: int):
         self.pad_token_id = pad_token_id
+        # Expose a tokenizer-like object so AppendEOSBlockWrapper can access eos_token_id
+        from types import SimpleNamespace
+        self.tokenizer = SimpleNamespace(eos_token_id=eos_token_id)
 
     def __call__(self, features, return_tensors=None):
         input_ids = _pad_sequence(
@@ -335,7 +338,7 @@ def train():
         args=training_args,
         data_collator=(
             dllm.core.trainers.bd3lm.AppendEOSBlockWrapper(
-                _SimpleSeq2SeqCollator(pad_token_id=tokenizer.pad_token_id),
+                _SimpleSeq2SeqCollator(pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id),
                 block_size=training_args.block_size,
             )
         ),
