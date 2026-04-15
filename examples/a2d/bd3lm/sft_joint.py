@@ -115,7 +115,7 @@ def _load_one(raw_spec: str) -> DatasetDict:
         ds = raw.map(
             toolcall_reformat,
             remove_columns=raw[train_split].column_names,
-            num_proc=4,
+            num_proc=1,
             desc=f"Reformatting {name}",
         ).filter(lambda ex: ex.get("messages") is not None)
     else:

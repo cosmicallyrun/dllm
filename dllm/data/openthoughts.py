@@ -73,7 +73,7 @@ def load_dataset_openthoughts(dataset_name_or_path: str) -> DatasetDict:
     dataset = dataset.map(
         map_fn,
         remove_columns=dataset["train"].column_names,
-        num_proc=4,
+        num_proc=1,
         desc="Parsing OpenThoughts conversations",
     )
     return dataset
