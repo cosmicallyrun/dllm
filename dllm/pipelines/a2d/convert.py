@@ -9,7 +9,8 @@ A2D_CONFIG_MAP = {
     "llama":   dllm.pipelines.a2d.A2DLlamaConfig,
     "qwen2":   dllm.pipelines.a2d.A2DQwen2Config,
     "qwen3":   dllm.pipelines.a2d.A2DQwen3Config,
-    "qwen3_5": dllm.pipelines.a2d.A2DQwen3_5Config,
+    "qwen3_5":      dllm.pipelines.a2d.A2DQwen3_5Config,
+    "qwen3_5_text": dllm.pipelines.a2d.A2DQwen3_5Config,
 }
 
 
