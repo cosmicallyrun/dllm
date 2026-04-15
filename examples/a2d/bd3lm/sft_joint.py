@@ -245,7 +245,7 @@ class DataArguments(dllm.utils.DataArguments):
 @dataclass
 class TrainingArguments(dllm.core.trainers.BD3LMConfig):
     output_dir: str = ".models/a2d/Qwen3-0.6B/bd3lm/joint"
-    group_by_length: bool = True
+    group_by_length: bool = False
     num_train_epochs: int = 3
     learning_rate: float = 5e-5
     per_device_train_batch_size: int = 8
@@ -274,6 +274,9 @@ def train():
     if num_added > 0:
         logger.info(f"Added {num_added} special tokens: {SPECIAL_TOKENS}")
         model.resize_token_embeddings(len(tokenizer))
+
+    # Force single-process data loading to avoid multiprocessing slice/write bugs
+    data_args.num_proc = 1
 
     with accelerate.PartialState().local_main_process_first():
         logger.info(f"Loading joint dataset: {data_args.dataset_args}")
