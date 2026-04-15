@@ -111,9 +111,10 @@ def _load_one(raw_spec: str) -> DatasetDict:
         ds = reasoning_loader(name)
     elif toolcall_reformat:
         raw = load_dataset(name)
+        train_split = "train" if "train" in raw else next(k for k in raw if "train" in k)
         ds = raw.map(
             toolcall_reformat,
-            remove_columns=raw["train"].column_names,
+            remove_columns=raw[train_split].column_names,
             num_proc=4,
             desc=f"Reformatting {name}",
         ).filter(lambda ex: ex.get("messages") is not None)
@@ -122,6 +123,16 @@ def _load_one(raw_spec: str) -> DatasetDict:
 
     if not isinstance(ds, DatasetDict):
         ds = DatasetDict({"train": ds})
+
+    # Normalise split names (e.g. ultrachat uses train_gen/test_gen)
+    if "train" not in ds:
+        train_key = next((k for k in ds if "train" in k), None)
+        test_key  = next((k for k in ds if "test"  in k), None)
+        if train_key:
+            ds = DatasetDict({
+                "train": ds[train_key],
+                **({"test": ds[test_key]} if test_key else {}),
+            })
 
     if "test" not in ds:
         eval_n = min(100, max(50, len(ds["train"]) // 20))
