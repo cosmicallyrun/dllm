@@ -116,7 +116,7 @@ def _load_one(raw_spec: str) -> DatasetDict:
             remove_columns=raw["train"].column_names,
             num_proc=4,
             desc=f"Reformatting {name}",
-        ).filter(lambda ex: ex["messages"] is not None)
+        ).filter(lambda ex: ex.get("messages") is not None)
     else:
         ds = load_dataset(name)  # assume already has "messages" column
 

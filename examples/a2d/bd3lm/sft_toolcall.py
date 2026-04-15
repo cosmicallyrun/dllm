@@ -203,7 +203,7 @@ def _hermes_thinking_map_fn(example: dict) -> dict | None:
         # skip tool-result turns
 
     if len(messages) < 2:
-        return None
+        return {"messages": None}
     return {"messages": messages}
 
 
@@ -282,7 +282,7 @@ def _glaive_map_fn(example: dict) -> dict | None:
                 messages.append({"role": "assistant", "content": part})
 
     if len(messages) < 2:
-        return None
+        return {"messages": None}
     return {"messages": messages}
 
 
