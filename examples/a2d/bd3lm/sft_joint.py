@@ -303,7 +303,7 @@ def train():
 
     trainer = dllm.core.trainers.BD3LMTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=dataset["train"],
         eval_dataset=dataset.get("test", None),
         args=training_args,
