@@ -50,7 +50,15 @@ from transformers.utils import (
     logging,
     replace_return_docstrings,
 )
-from transformers.utils.import_utils import is_torch_fx_available
+try:
+    from transformers.utils.import_utils import is_torch_fx_available
+except ImportError:
+    def is_torch_fx_available():
+        try:
+            import torch.fx  # noqa
+            return True
+        except ImportError:
+            return False
 from .configuration_llada2_moe import LLaDA2MoeConfig
 from transformers.generation.utils import GenerationMixin
 
