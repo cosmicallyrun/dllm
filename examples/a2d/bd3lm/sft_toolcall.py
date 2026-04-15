@@ -301,15 +301,23 @@ def _toolcall_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> di
     Tokenise a row that already has row["messages"] in the standard format.
     Passes enable_thinking=True so <think>...</think> are included.
     """
+    def _to_ids(result):
+        if isinstance(result, list):
+            return result
+        if hasattr(result, "input_ids"):
+            ids = result.input_ids
+            return ids.tolist() if hasattr(ids, "tolist") else list(ids)
+        return list(result)
+
     try:
-        prompt_response_tokens = list(tokenizer.apply_chat_template(
+        prompt_response_tokens = _to_ids(tokenizer.apply_chat_template(
             row["messages"],
             tokenize=True,
             add_generation_prompt=False,
             enable_thinking=True,
         ))
     except Exception:
-        prompt_response_tokens = list(tokenizer.apply_chat_template(
+        prompt_response_tokens = _to_ids(tokenizer.apply_chat_template(
             row["messages"],
             tokenize=True,
             add_generation_prompt=False,
@@ -319,14 +327,14 @@ def _toolcall_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> di
 
     if mask_prompt_loss:
         try:
-            prompt_tokens = list(tokenizer.apply_chat_template(
+            prompt_tokens = _to_ids(tokenizer.apply_chat_template(
                 row["messages"][:-1],
                 tokenize=True,
                 add_generation_prompt=True,
                 enable_thinking=True,
             ))
         except Exception:
-            prompt_tokens = list(tokenizer.apply_chat_template(
+            prompt_tokens = _to_ids(tokenizer.apply_chat_template(
                 row["messages"][:-1],
                 tokenize=True,
                 add_generation_prompt=True,

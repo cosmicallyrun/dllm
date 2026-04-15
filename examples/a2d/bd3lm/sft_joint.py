@@ -186,18 +186,28 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
       - general rows  (no reasoning_content)
     All are tokenised with enable_thinking=True.
     """
+    def _to_ids(result):
+        """Extract a plain list of ints from apply_chat_template output.
+        Transformers 5.x returns BatchEncoding; older versions return a plain list."""
+        if isinstance(result, list):
+            return result
+        if hasattr(result, "input_ids"):
+            ids = result.input_ids
+            return ids.tolist() if hasattr(ids, "tolist") else list(ids)
+        return list(result)
+
     _null = {"input_ids": None, "labels": None, "prompt_len": 0}
     messages = row.get("messages")
     if not messages or len(messages) < 2:
         return _null
 
     try:
-        full_tokens = list(tokenizer.apply_chat_template(
+        full_tokens = _to_ids(tokenizer.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=False, enable_thinking=True,
         ))
     except Exception:
         try:
-            full_tokens = list(tokenizer.apply_chat_template(
+            full_tokens = _to_ids(tokenizer.apply_chat_template(
                 messages, tokenize=True, add_generation_prompt=False,
             ))
         except Exception:
@@ -207,11 +217,11 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
 
     if mask_prompt_loss:
         try:
-            prompt_tokens = list(tokenizer.apply_chat_template(
+            prompt_tokens = _to_ids(tokenizer.apply_chat_template(
                 messages[:-1], tokenize=True, add_generation_prompt=True, enable_thinking=True,
             ))
         except Exception:
-            prompt_tokens = list(tokenizer.apply_chat_template(
+            prompt_tokens = _to_ids(tokenizer.apply_chat_template(
                 messages[:-1], tokenize=True, add_generation_prompt=True,
             ))
         labels[: len(prompt_tokens)] = [-100] * len(prompt_tokens)
