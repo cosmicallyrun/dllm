@@ -186,9 +186,10 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
       - general rows  (no reasoning_content)
     All are tokenised with enable_thinking=True.
     """
+    _null = {"input_ids": None, "labels": None}
     messages = row.get("messages")
     if not messages or len(messages) < 2:
-        return None
+        return _null
 
     try:
         full_tokens = list(tokenizer.apply_chat_template(
@@ -200,7 +201,7 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
                 messages, tokenize=True, add_generation_prompt=False,
             ))
         except Exception:
-            return None
+            return _null
 
     labels = full_tokens.copy()
 
@@ -285,12 +286,12 @@ def train():
 
         dataset = dataset.map(
             partial(_joint_sft_map_fn, tokenizer=tokenizer, mask_prompt_loss=data_args.mask_prompt_loss),
-            num_proc=data_args.num_proc,
+            num_proc=1,
             desc="Tokenising joint dataset",
         )
         dataset = dataset.filter(
             lambda ex: ex["input_ids"] is not None,
-            num_proc=data_args.num_proc,
+            num_proc=1,
         )
         dataset = dllm.utils.post_process_dataset(dataset, data_args)
 
