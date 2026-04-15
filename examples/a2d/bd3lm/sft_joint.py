@@ -186,7 +186,7 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
       - general rows  (no reasoning_content)
     All are tokenised with enable_thinking=True.
     """
-    _null = {"input_ids": None, "labels": None}
+    _null = {"input_ids": None, "labels": None, "prompt_len": 0}
     messages = row.get("messages")
     if not messages or len(messages) < 2:
         return _null
@@ -217,7 +217,7 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
         labels[: len(prompt_tokens)] = [-100] * len(prompt_tokens)
         return {"input_ids": full_tokens, "labels": labels, "prompt_len": len(prompt_tokens)}
 
-    return {"input_ids": full_tokens, "labels": labels}
+    return {"input_ids": full_tokens, "labels": labels, "prompt_len": 0}
 
 
 # ── Args ──────────────────────────────────────────────────────────────────────
