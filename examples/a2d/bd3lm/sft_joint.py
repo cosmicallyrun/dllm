@@ -256,6 +256,28 @@ class TrainingArguments(dllm.core.trainers.BD3LMConfig):
     save_steps: int = 200
 
 
+# ── Simple collator (avoids transformers 5.x DataCollatorForSeq2Seq compat issues) ──
+
+import torch as _torch
+from torch.nn.utils.rnn import pad_sequence as _pad_sequence
+
+class _SimpleSeq2SeqCollator:
+    """Pads input_ids (with pad_token_id) and labels (with -100) into batch tensors."""
+    def __init__(self, pad_token_id: int):
+        self.pad_token_id = pad_token_id
+
+    def __call__(self, features, return_tensors=None):
+        input_ids = _pad_sequence(
+            [_torch.tensor(list(f["input_ids"]), dtype=_torch.long) for f in features],
+            batch_first=True, padding_value=self.pad_token_id,
+        )
+        labels = _pad_sequence(
+            [_torch.tensor(list(f["labels"]), dtype=_torch.long) for f in features],
+            batch_first=True, padding_value=-100,
+        )
+        return {"input_ids": input_ids, "labels": labels}
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def train():
@@ -313,9 +335,7 @@ def train():
         args=training_args,
         data_collator=(
             dllm.core.trainers.bd3lm.AppendEOSBlockWrapper(
-                transformers.DataCollatorForSeq2Seq(
-                    tokenizer, return_tensors="pt", padding=True,
-                ),
+                _SimpleSeq2SeqCollator(pad_token_id=tokenizer.pad_token_id),
                 block_size=training_args.block_size,
             )
         ),
