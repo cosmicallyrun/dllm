@@ -145,9 +145,26 @@ def _load_one(raw_spec: str) -> DatasetDict:
     return ds
 
 
+def _normalize_messages(ex):
+    """Ensure all message dicts have the same keys so datasets can concatenate."""
+    msgs = ex.get("messages")
+    if not msgs:
+        return {"messages": msgs}
+    return {"messages": [
+        {"role": m.get("role", ""), "content": m.get("content", ""), "reasoning_content": m.get("reasoning_content", "")}
+        for m in msgs
+    ]}
+
+
 def _load_datasets(dataset_args: str) -> DatasetDict:
     specs = [s.strip() for s in dataset_args.split("+") if s.strip()]
     parts = [_load_one(s) for s in specs]
+
+    # Normalise schema so all parts have identical message field names
+    parts = [
+        p.map(_normalize_messages, num_proc=4, desc="Normalising schema")
+        for p in parts
+    ]
 
     if len(parts) == 1:
         return parts[0]
