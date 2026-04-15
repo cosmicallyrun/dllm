@@ -161,8 +161,9 @@ def _load_datasets(dataset_args: str) -> DatasetDict:
     parts = [_load_one(s) for s in specs]
 
     # Normalise schema so all parts have identical message field names
+    # num_proc=1 avoids "unhashable type: slice" multiprocessing bug in datasets
     parts = [
-        p.map(_normalize_messages, num_proc=4, desc="Normalising schema")
+        p.map(_normalize_messages, num_proc=1, desc="Normalising schema")
         for p in parts
     ]
 
