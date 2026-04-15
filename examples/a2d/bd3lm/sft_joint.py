@@ -60,6 +60,9 @@ import accelerate
 import transformers
 from datasets import DatasetDict, concatenate_datasets
 
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+
 import dllm
 from dllm.data.s1k import load_dataset_s1k
 from dllm.data.openthoughts import load_dataset_openthoughts
