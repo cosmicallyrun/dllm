@@ -129,8 +129,12 @@ def bidirectional_chunk_gated_delta_rule(
 
     # ── PATCH: cumulative decay (no .tril — full symmetric matrix) ──────────
     g = g.cumsum(dim=-1)
-    # exp(g_i - g_j) for all i, j  (not just j ≤ i)
-    decay_mask = (g.unsqueeze(-1) - g.unsqueeze(-2)).exp().float()
+    # Symmetric absolute-value decay: exp(-|g_i - g_j|) ∈ (0, 1].
+    # The original causal version used exp(g_i - g_j).tril(), which was safe
+    # because g is a non-increasing cumsum so g[i]-g[j] ≤ 0 for i ≥ j.
+    # The upper triangle (i < j) has g[i]-g[j] > 0 and exp() can overflow to
+    # Inf → NaN in subsequent matmuls.  Using abs avoids this completely.
+    decay_mask = (-torch.abs(g.unsqueeze(-1) - g.unsqueeze(-2))).exp().float()
 
     # ── PATCH: intra-chunk delta rule — no masked_fill ──────────────────────
     # ORIGINAL had: mask = torch.triu(...); attn = (...).masked_fill(mask, 0)
@@ -175,6 +179,8 @@ def bidirectional_chunk_gated_delta_rule(
     )
     core_attn_out = core_attn_out[:, :, :sequence_length]
     core_attn_out = core_attn_out.transpose(1, 2).contiguous().to(initial_dtype)
+    # Safety guard: replace any residual NaN/Inf (from extreme gate values) with 0
+    core_attn_out = torch.nan_to_num(core_attn_out, nan=0.0, posinf=0.0, neginf=0.0)
     return core_attn_out, last_recurrent_state
 
 
