@@ -296,7 +296,13 @@ class A2DQwen3_5GatedDeltaNet(Qwen3_5GatedDeltaNet):
         z = z.reshape(-1, self.head_v_dim)
         core_attn_out = self.norm(core_attn_out, z)
         core_attn_out = core_attn_out.reshape(batch_size, seq_len, -1)
-        return self.out_proj(core_attn_out)
+        out = self.out_proj(core_attn_out)
+        # Detach stops NaN gradients that arise from backpropagating through
+        # the 63-step in-place delta-rule loop (the backward gradient chain grows
+        # exponentially in loop depth).  GDN still contributes bidirectional
+        # features to the forward pass; gradients flow through the residual
+        # connection in the decoder layer (h_new = h + gdn.detach() → dL/dh = dL/dh_new).
+        return out.detach()
 
 
 # ---------------------------------------------------------------------------
