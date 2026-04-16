@@ -89,11 +89,19 @@ def prompt_choice() -> Literal["1", "2", "3"]:
 
 def build_chat_inputs(tokenizer, messages: List[dict], add_generation_prompt: bool):
     """Tokenize chat messages into inputs tensor."""
-    result = tokenizer.apply_chat_template(
-        messages,
-        add_generation_prompt=add_generation_prompt,
-        tokenize=True,
-    )
+    try:
+        result = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=add_generation_prompt,
+            tokenize=True,
+            enable_thinking=True,
+        )
+    except TypeError:
+        result = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=add_generation_prompt,
+            tokenize=True,
+        )
     # transformers 5.x returns BatchEncoding; extract plain list of token ids
     if hasattr(result, "input_ids"):
         ids = result.input_ids
