@@ -1,0 +1,25 @@
+python - <<'EOF'
+import os
+os.environ["HF_HOME"] = "/workspace/.hf_cache"
+os.environ["HF_DATASETS_CACHE"] = "/workspace/.hf_cache/datasets"
+
+from datasets import load_dataset
+from transformers import AutoTokenizer
+
+tok = AutoTokenizer.from_pretrained("/workspace/dllm/.models/a2d/Qwen3.5-0.8B")
+
+ds = load_dataset("open-thoughts/OpenThoughts-114k", split="train[:2000]")
+
+lengths = []
+for ex in ds:
+    convs = ex.get("conversations", [])
+    text = " ".join(t.get("value","") for t in convs)
+    lengths.append(len(tok.encode(text)))
+
+under_1024 = sum(1 for l in lengths if l <= 1024)
+under_2048 = sum(1 for l in lengths if l <= 2048)
+print(f"Sample: {len(lengths)} examples")
+print(f"Under 1024 tokens: {under_1024} ({100*under_1024/len(lengths):.1f}%)")
+print(f"Under 2048 tokens: {under_2048} ({100*under_2048/len(lengths):.1f}%)")
+print(f"Median length: {sorted(lengths)[len(lengths)//2]}")
+EOF
