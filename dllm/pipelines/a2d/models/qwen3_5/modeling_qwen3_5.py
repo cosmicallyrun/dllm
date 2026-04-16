@@ -359,23 +359,20 @@ class A2DQwen3_5GatedDeltaNet(Qwen3_5GatedDeltaNet):
 
 class A2DQwen3_5TextModel(Qwen3_5TextModel):
     """
-    Replaces:
-      • create_causal_mask()  →  _prepare_4d_attention_mask() (padding only)
-        for the full-attention layers
-      • All Qwen3_5GatedDeltaNet submodules  →  A2DQwen3_5GatedDeltaNet
+    Replaces create_causal_mask() with a padding-only 4-D mask for the
+    standard full-attention layers (1 per 4-layer cycle).
+
+    GDN layers (3 per cycle) remain CAUSAL.  Making them bidirectional
+    causes numerical blow-up: the full (non-triangular) attn matrix makes
+    (attn + I) @ v_beta ~2× larger per row, and the inter-chunk recurrence
+    amplifies this exponentially across chunks → NaN in both forward and
+    backward.  Bidirectional context is provided by the standard attention
+    layers instead, which is the approach used by A2D for linear attention
+    in other architectures.
     """
 
     def __init__(self, config: Qwen3_5Config):
         super().__init__(config)
-        # Swap every GDN layer for its bidirectional variant in-place
-        for i, layer in enumerate(self.layers):
-            for attr_name in dir(layer):
-                obj = getattr(layer, attr_name, None)
-                if isinstance(obj, Qwen3_5GatedDeltaNet):
-                    bidi = A2DQwen3_5GatedDeltaNet(config, i)
-                    # copy pretrained weights (state_dict keys match because same class hierarchy)
-                    bidi.load_state_dict(obj.state_dict(), strict=False)
-                    setattr(layer, attr_name, bidi)
 
     def forward(
         self,
