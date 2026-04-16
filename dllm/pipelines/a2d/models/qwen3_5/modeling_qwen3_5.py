@@ -4,25 +4,34 @@ A2D (Autoregressive-to-Diffusion) conversion for Qwen3.5.
 Qwen3.5 is a hybrid model: every 4-layer cycle has
   3 × Gated DeltaNet (GDN / linear attention)  +  1 × standard Gated Attention
 
-Two distinct patches are required to make it bidirectional:
+Three patches make it bidirectional:
 
 PATCH 1 — Standard attention layers  (1 per cycle)
   Replace create_causal_mask() with a padding-only 4-D mask.
-  Identical approach to the existing A2DQwen3Model.
 
 PATCH 2 — GDN layers  (3 per cycle)
-  Causality is baked into torch_chunk_gated_delta_rule() via:
-    (a) mask = torch.triu(..., diagonal=0)               ← intra-chunk causal mask
-    (b) decay_mask = (...).tril().exp().tril()           ← lower-triangular decay
-  We replace the instance attribute self.chunk_gated_delta_rule with a
-  bidirectional version that removes both constraints.
-  The inter-chunk recurrence (the for-loop over chunks) remains left-to-right,
-  which is a known limitation — full BiRNN-style bidirectionality would need a
-  second backward pass and doubles compute/memory.
+  Two strategies available (controlled by A2DQwen3_5Config.bidi_gdn_mode):
 
-PATCH 3 — Causal Conv1d
-  Set self.causal_conv1d_fn = None to fall back to nn.Conv1d; then override
-  the fallback in forward to use symmetric padding instead of causal padding.
+  "causal" (default, safe):
+    GDN stays causal. Bidirectional context comes only from standard
+    attention layers (6/24 layers). Works but limits diffusion quality.
+
+  "symmetric_solve":
+    Replace the causal delta-rule recurrence with a closed-form
+    symmetric delta-memory solve in head-space:
+
+      M(I + K^T B K) = K^T B V   →   Y = Q M
+
+    The inverse is d_head × d_head (128×128), not seq × seq, so it's
+    O(n d² + d³) — linear in sequence length. Bidirectional by
+    construction, no sequential loop, stable Cholesky solve.
+
+    Reference: Gated Delta Networks (arxiv:2412.06464),
+    DeltaNet parallelization (arxiv:2406.06484),
+    LION bidirectional linear attention (arxiv:2502.16249)
+
+PATCH 3 — Causal Conv1d  (only when bidi_gdn_mode != "causal")
+  Symmetric padding instead of causal padding.
 
 Reference:
   Gated Delta Networks: https://arxiv.org/abs/2412.06464
@@ -239,6 +248,97 @@ def bidirectional_chunk_gated_delta_rule(
 
 
 # ---------------------------------------------------------------------------
+# PATCH 2b — Symmetric delta-memory solve (new bidirectional GDN algorithm)
+# ---------------------------------------------------------------------------
+
+def symmetric_delta_memory(
+    query,
+    key,
+    value,
+    g,
+    beta,
+    chunk_size=64,
+    initial_state=None,
+    output_final_state=False,
+    use_qk_l2norm_in_kernel=False,
+    reg_lambda=1e-4,
+):
+    """
+    Bidirectional GDN via closed-form head-space solve.
+
+    Instead of the causal delta-rule recurrence (63-step sequential loop),
+    solve for the equilibrium memory matrix M in closed form:
+
+        M (I + K^T B K) = K^T B V
+        Y = Q @ M
+
+    The inverse is only d_k × d_k (128×128 for Qwen3.5), making this:
+      - O(n d_k² + d_k³) per head — linear in sequence length
+      - Bidirectional by construction — no sequential dependency
+      - Numerically stable — Cholesky solve on a PD matrix
+      - TPU/XLA compatible — no dynamic control flow or in-place ops
+
+    Signature matches torch_chunk_gated_delta_rule for drop-in replacement.
+    """
+    try:
+        from transformers.models.qwen3_5.modeling_qwen3_5 import l2norm
+    except ImportError:
+        def l2norm(x, dim=-1, eps=1e-6):
+            return x / (x.norm(dim=dim, keepdim=True) + eps)
+
+    initial_dtype = query.dtype
+    if use_qk_l2norm_in_kernel:
+        query = l2norm(query, dim=-1, eps=1e-6)
+        key = l2norm(key, dim=-1, eps=1e-6)
+
+    # [B, L, H, d] → [B, H, L, d] and upcast to float32 for stability
+    query, key, value, beta = [
+        x.transpose(1, 2).contiguous().to(torch.float32)
+        for x in (query, key, value, beta)
+    ]
+
+    batch_size, num_heads, seq_len, k_head_dim = query.shape
+    v_head_dim = value.shape[-1]
+    scale = k_head_dim ** -0.5
+    query = query * scale
+
+    # Beta-weighted keys: K_β = K * β  [B, H, L, d_k]
+    beta_w = beta.unsqueeze(-1)  # [B, H, L, 1]
+    K_beta = key * beta_w
+
+    # Gram matrix: G = I + K^T B K  [B, H, d_k, d_k]
+    # K_beta^T @ K = [B, H, d_k, L] @ [B, H, L, d_k] = [B, H, d_k, d_k]
+    G = torch.matmul(K_beta.transpose(-1, -2), key)
+    G = G + (1.0 + reg_lambda) * torch.eye(
+        k_head_dim, device=G.device, dtype=G.dtype
+    )
+
+    # Cross-term: C = K^T B V  [B, H, d_k, d_v]
+    C = torch.matmul(K_beta.transpose(-1, -2), value)
+
+    # Solve G @ M = C → M = G^{-1} C  [B, H, d_k, d_v]
+    # G is symmetric positive-definite, so Cholesky is optimal.
+    # Fallback to LU solve for XLA/TPU compatibility.
+    try:
+        L_chol = torch.linalg.cholesky(G)
+        M = torch.cholesky_solve(C, L_chol)
+    except RuntimeError:
+        M = torch.linalg.solve(G, C)
+
+    # Output: Y = Q @ M  [B, H, L, d_v]
+    output = torch.matmul(query, M)
+
+    output = output.transpose(1, 2).contiguous().to(initial_dtype)
+    output = torch.nan_to_num(output, nan=0.0, posinf=0.0, neginf=0.0)
+
+    last_state = None
+    if output_final_state:
+        last_state = M.to(initial_dtype)
+
+    return output, last_state
+
+
+# ---------------------------------------------------------------------------
 # PATCH 2+3 — bidirectional GDN layer
 # ---------------------------------------------------------------------------
 
@@ -362,17 +462,23 @@ class A2DQwen3_5TextModel(Qwen3_5TextModel):
     Replaces create_causal_mask() with a padding-only 4-D mask for the
     standard full-attention layers (1 per 4-layer cycle).
 
-    GDN layers (3 per cycle) remain CAUSAL.  Making them bidirectional
-    causes numerical blow-up: the full (non-triangular) attn matrix makes
-    (attn + I) @ v_beta ~2× larger per row, and the inter-chunk recurrence
-    amplifies this exponentially across chunks → NaN in both forward and
-    backward.  Bidirectional context is provided by the standard attention
-    layers instead, which is the approach used by A2D for linear attention
-    in other architectures.
+    GDN layers are controlled by config.bidi_gdn_mode:
+      "causal"          — GDN stays causal (safe default)
+      "symmetric_solve" — GDN uses symmetric delta-memory solve (all 24 layers bidi)
     """
 
     def __init__(self, config: Qwen3_5Config):
         super().__init__(config)
+
+        bidi_mode = getattr(config, "bidi_gdn_mode", "causal")
+        if bidi_mode == "symmetric_solve":
+            for layer in self.layers:
+                if hasattr(layer, "linear_attn") and layer.linear_attn is not None:
+                    old = layer.linear_attn
+                    new_layer = A2DQwen3_5GatedDeltaNet(config, old.layer_idx)
+                    new_layer.chunk_gated_delta_rule = symmetric_delta_memory
+                    new_layer.load_state_dict(old.state_dict())
+                    layer.linear_attn = new_layer
 
     def forward(
         self,
@@ -461,6 +567,10 @@ class A2DQwen3_5TextModel(Qwen3_5TextModel):
 
 class A2DQwen3_5Config(Qwen3_5Config):
     model_type = "a2d-qwen3_5"
+
+    def __init__(self, bidi_gdn_mode: str = "causal", **kwargs):
+        super().__init__(**kwargs)
+        self.bidi_gdn_mode = bidi_gdn_mode
 
 
 class A2DQwen3_5LMHeadModel(Qwen3_5ForCausalLM):

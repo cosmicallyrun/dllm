@@ -235,6 +235,10 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
 @dataclass
 class ModelArguments(dllm.utils.ModelArguments):
     model_name_or_path: str = ".models/a2d/Qwen3-0.6B"
+    bidi_gdn_mode: str = field(
+        default="causal",
+        metadata={"help": "GDN bidirectionality: 'causal' (safe) or 'symmetric_solve' (all layers bidi)"},
+    )
 
 
 @dataclass
@@ -301,7 +305,15 @@ def train():
     dllm.utils.print_args_main(model_args, data_args, training_args)
     dllm.utils.initial_training_setup(model_args, data_args, training_args)
 
-    model     = dllm.utils.get_model(model_args=model_args)
+    # Inject bidi_gdn_mode into model config before construction
+    if model_args.bidi_gdn_mode != "causal":
+        from dllm.pipelines.a2d.models.qwen3_5.modeling_qwen3_5 import A2DQwen3_5Config
+        cfg = A2DQwen3_5Config.from_pretrained(model_args.model_name_or_path)
+        cfg.bidi_gdn_mode = model_args.bidi_gdn_mode
+        logger.info(f"Bidirectional GDN mode: {model_args.bidi_gdn_mode}")
+        model = dllm.utils.get_model(model_args=model_args, config=cfg)
+    else:
+        model = dllm.utils.get_model(model_args=model_args)
     tokenizer = dllm.utils.get_tokenizer(model_args=model_args)
 
     # Add tool-call special tokens (no-op if already present)
