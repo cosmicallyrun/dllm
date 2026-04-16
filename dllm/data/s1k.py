@@ -28,7 +28,7 @@ def load_dataset_s1k(dataset_name_or_path: str) -> DatasetDict:
         }
 
     dataset = dataset.map(
-        map_fn, remove_columns=dataset["train"].column_names, num_proc=4
+        map_fn, remove_columns=dataset["train"].column_names, num_proc=1
     )
     return dataset
 

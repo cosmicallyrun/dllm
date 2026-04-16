@@ -8,18 +8,38 @@ from transformers import AutoTokenizer
 
 tok = AutoTokenizer.from_pretrained("/workspace/dllm/.models/a2d/Qwen3.5-0.8B")
 
-ds = load_dataset("open-thoughts/OpenThoughts-114k", split="train[:2000]")
+def stats(name, lengths):
+    u1k = sum(1 for l in lengths if l <= 1024)
+    u2k = sum(1 for l in lengths if l <= 2048)
+    med = sorted(lengths)[len(lengths)//2]
+    print(f"\n{name} (n={len(lengths)})")
+    print(f"  Under 1024: {u1k} ({100*u1k/len(lengths):.1f}%)")
+    print(f"  Under 2048: {u2k} ({100*u2k/len(lengths):.1f}%)")
+    print(f"  Median: {med} tokens")
 
-lengths = []
-for ex in ds:
-    convs = ex.get("conversations", [])
-    text = " ".join(t.get("value","") for t in convs)
-    lengths.append(len(tok.encode(text)))
+# s1K
+ds = load_dataset("simplescaling/s1K", split="train")
+lengths = [len(tok.encode(ex["question"] + " " + (ex["thinking_trajectories"][0] if ex["thinking_trajectories"] else "") + " " + (ex["attempt"] or ""))) for ex in ds]
+stats("simplescaling/s1K", lengths)
 
-under_1024 = sum(1 for l in lengths if l <= 1024)
-under_2048 = sum(1 for l in lengths if l <= 2048)
-print(f"Sample: {len(lengths)} examples")
-print(f"Under 1024 tokens: {under_1024} ({100*under_1024/len(lengths):.1f}%)")
-print(f"Under 2048 tokens: {under_2048} ({100*under_2048/len(lengths):.1f}%)")
-print(f"Median length: {sorted(lengths)[len(lengths)//2]}")
+# Hermes thinking
+ds = load_dataset("Jofthomas/hermes-function-calling-thinking-V1", split="train[:500]")
+lengths = [len(tok.encode(" ".join(t.get("value","") for t in ex.get("conversations",[])))) for ex in ds]
+stats("Jofthomas/hermes-function-calling-thinking-V1", lengths)
+
+# Hermes plain
+ds = load_dataset("NousResearch/hermes-function-calling-v1", split="train[:500]")
+lengths = [len(tok.encode(" ".join(t.get("value","") for t in ex.get("conversations",[])))) for ex in ds]
+stats("NousResearch/hermes-function-calling-v1", lengths)
+
+# Alpaca
+ds = load_dataset("tatsu-lab/alpaca", split="train[:500]")
+lengths = [len(tok.encode(ex.get("instruction","") + " " + ex.get("input","") + " " + ex.get("output",""))) for ex in ds]
+stats("tatsu-lab/alpaca", lengths)
+
+# UltraChat
+ds = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_gen[:500]")
+lengths = [len(tok.encode(" ".join(m.get("content","") for m in ex.get("messages",[])))) for ex in ds]
+stats("HuggingFaceH4/ultrachat_200k", lengths)
+
 EOF
