@@ -196,7 +196,7 @@ def _joint_sft_map_fn(row, *, tokenizer, mask_prompt_loss: bool = True) -> dict 
             return ids.tolist() if hasattr(ids, "tolist") else list(ids)
         return list(result)
 
-    _null = {"input_ids": None, "labels": None, "prompt_len": 0}
+    _null = {"input_ids": [], "labels": [], "prompt_len": 0}
     messages = row.get("messages")
     if not messages or len(messages) < 2:
         return _null
@@ -341,7 +341,7 @@ def train():
             desc="Tokenising joint dataset",
         )
         dataset = dataset.filter(
-            lambda ex: ex["input_ids"] is not None,
+            lambda ex: len(ex["input_ids"]) > 0,
             num_proc=1,
         )
         dataset = dllm.utils.post_process_dataset(dataset, data_args)
