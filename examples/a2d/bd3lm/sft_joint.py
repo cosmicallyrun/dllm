@@ -304,10 +304,16 @@ def train():
     model     = dllm.utils.get_model(model_args=model_args)
     tokenizer = dllm.utils.get_tokenizer(model_args=model_args)
 
+    # Add tool-call special tokens (no-op if already present)
+    num_added = tokenizer.add_special_tokens({"additional_special_tokens": SPECIAL_TOKENS})
+    if num_added > 0:
+        logger.info(f"Added {num_added} special tokens: {SPECIAL_TOKENS}")
+        model.resize_token_embeddings(len(tokenizer))
+
     # ── NaN gradient guard ────────────────────────────────────────────────────
-    # The GDN layers were pretrained for causal operation; the bidirectional
-    # variant can produce NaN gradients in the in-place delta-rule loop.
-    # Clamp those to 0 so one bad backward step can't corrupt all weights.
+    # MUST be registered AFTER resize_token_embeddings so the new embedding/LM-head
+    # parameters are also covered.  Without this, those parameters get unguarded NaN
+    # gradients → clip_grad_norm_ returns NaN → weight corruption.
     import torch as _t
     def _nan_hook(grad):
         return _t.nan_to_num(grad, nan=0.0, posinf=0.0, neginf=0.0)
@@ -315,12 +321,6 @@ def train():
         if _p.requires_grad:
             _p.register_hook(_nan_hook)
     logger.info("Registered NaN-to-zero gradient hooks on all parameters")
-
-    # Add tool-call special tokens (no-op if already present)
-    num_added = tokenizer.add_special_tokens({"additional_special_tokens": SPECIAL_TOKENS})
-    if num_added > 0:
-        logger.info(f"Added {num_added} special tokens: {SPECIAL_TOKENS}")
-        model.resize_token_embeddings(len(tokenizer))
 
     # Force single-process data loading to avoid multiprocessing slice/write bugs
     data_args.num_proc = 1
