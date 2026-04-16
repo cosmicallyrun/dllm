@@ -304,34 +304,17 @@ def train():
     model     = dllm.utils.get_model(model_args=model_args)
     tokenizer = dllm.utils.get_tokenizer(model_args=model_args)
 
-    # ── Bidirectional GDN stabilisation ───────────────────────────────────────
-    # The GDN weights were pretrained for causal operation; running them with our
-    # bidirectional decay doubles the number of attending pairs per token vs.
-    # causal, so GDN outputs are roughly 2–3× larger than the standard-attention
-    # layers expect.  Scaling out_proj by 0.1 keeps GDN contributions small at
-    # start and lets the stable standard-attention layers dominate until the GDN
-    # weights re-learn their bidirectional role.
-    from dllm.pipelines.a2d.models.qwen3_5.modeling_qwen3_5 import A2DQwen3_5GatedDeltaNet
-    import torch as _t
-    _scaled = 0
-    with _t.no_grad():
-        for _module in model.modules():
-            if isinstance(_module, A2DQwen3_5GatedDeltaNet):
-                _module.out_proj.weight.data.mul_(0.1)
-                if _module.out_proj.bias is not None:
-                    _module.out_proj.bias.data.mul_(0.1)
-                _scaled += 1
-    if _scaled:
-        logger.info(f"Scaled down out_proj weights by 0.1 in {_scaled} GDN layers for stability")
-
     # ── NaN gradient guard ────────────────────────────────────────────────────
-    # If any GDN backward produces NaN (e.g. due to in-place loop autograd),
-    # clamp to 0 so one bad step can't corrupt all weights.
+    # The GDN layers were pretrained for causal operation; the bidirectional
+    # variant can produce NaN gradients in the in-place delta-rule loop.
+    # Clamp those to 0 so one bad backward step can't corrupt all weights.
+    import torch as _t
     def _nan_hook(grad):
         return _t.nan_to_num(grad, nan=0.0, posinf=0.0, neginf=0.0)
     for _p in model.parameters():
         if _p.requires_grad:
             _p.register_hook(_nan_hook)
+    logger.info("Registered NaN-to-zero gradient hooks on all parameters")
 
     # Add tool-call special tokens (no-op if already present)
     num_added = tokenizer.add_special_tokens({"additional_special_tokens": SPECIAL_TOKENS})
