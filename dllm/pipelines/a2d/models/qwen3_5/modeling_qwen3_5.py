@@ -51,6 +51,51 @@ from transformers.cache_utils import Cache, DynamicCache
 
 
 # ---------------------------------------------------------------------------
+# Straight-through autograd wrapper for the delta-rule intra-chunk loop
+# ---------------------------------------------------------------------------
+
+class _DeltaRuleStraightThrough(torch.autograd.Function):
+    """
+    Runs the delta-rule correction loop in the forward pass with full fidelity,
+    but uses the identity Jacobian (straight-through estimator) in the backward.
+
+    Why this is necessary
+    ---------------------
+    The loop   attn[i] = row + row @ sub   (63 iterations for chunk_size=64)
+    has a Jacobian per step of roughly (I + sub).  The product of 63 such
+    Jacobians scales as O((1 + ||sub||)^63) which overflows float32/bfloat16
+    to NaN before reaching any model parameter, making vanilla autograd
+    unusable.
+
+    Why straight-through is a reasonable approximation
+    ---------------------------------------------------
+    The gradient flowing INTO this operation is d(loss)/d(attn_final).
+    With straight-through we treat d(attn_final)/d(attn_init) ≈ I, so
+    the GDN parameters receive  d(loss)/d(attn_final)  backpropagated
+    through the STABLE   attn_init = -(k_beta @ key^T) * decay_mask
+    computation.  Those Jacobians involve only matrix transposes and
+    element-wise operations — numerically well-behaved.  This gives
+    meaningful parameter updates without the exponential gradient chain.
+    """
+
+    @staticmethod
+    def forward(ctx, attn):
+        # Run the full sequential loop on a detached copy (no autograd tracking)
+        a = attn.detach().clone()
+        chunk_size = a.shape[-1]
+        for i in range(1, chunk_size):
+            row = a[..., i, :i].clone()
+            sub = a[..., :i, :i].clone()
+            a[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)
+        return a
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Straight-through: identity Jacobian, gradient passes unchanged
+        return grad_output
+
+
+# ---------------------------------------------------------------------------
 # PATCH 2 — bidirectional chunk gated delta rule
 # ---------------------------------------------------------------------------
 
@@ -140,11 +185,20 @@ def bidirectional_chunk_gated_delta_rule(
     # ORIGINAL had: mask = torch.triu(...); attn = (...).masked_fill(mask, 0)
     attn = -((k_beta @ key.transpose(-1, -2)) * decay_mask)
 
-    # Propagate the lower-triangular dependency structure (unchanged)
-    for i in range(1, chunk_size):
-        row = attn[..., i, :i].clone()
-        sub = attn[..., :i, :i].clone()
-        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)
+    # Propagate the lower-triangular dependency structure via a straight-through
+    # autograd wrapper.
+    #
+    # WHY: the sequential loop runs 63 steps of:
+    #   attn[i] = row + row @ sub   →   Jacobian at each step ≈ (I + sub)
+    # Multiplied over 63 steps the gradient chain grows as O((1+||A||)^63) and
+    # overflows to NaN before reaching any parameter.
+    #
+    # FIX (straight-through estimator): run the loop exactly in the forward pass
+    # so the features are correct; in the backward pass use the identity Jacobian
+    # (d attn_final / d attn_init ≈ I).  GDN parameters receive the full gradient
+    # signal from d(loss)/d(attn_final) propagated through the stable
+    # attn_init = -(k_beta @ key^T) * decay_mask computation.
+    attn = _DeltaRuleStraightThrough.apply(attn)
 
     attn = attn + torch.eye(chunk_size, dtype=attn.dtype, device=attn.device)
     value    = attn @ v_beta
@@ -296,13 +350,7 @@ class A2DQwen3_5GatedDeltaNet(Qwen3_5GatedDeltaNet):
         z = z.reshape(-1, self.head_v_dim)
         core_attn_out = self.norm(core_attn_out, z)
         core_attn_out = core_attn_out.reshape(batch_size, seq_len, -1)
-        out = self.out_proj(core_attn_out)
-        # Detach stops NaN gradients that arise from backpropagating through
-        # the 63-step in-place delta-rule loop (the backward gradient chain grows
-        # exponentially in loop depth).  GDN still contributes bidirectional
-        # features to the forward pass; gradients flow through the residual
-        # connection in the decoder layer (h_new = h + gdn.detach() → dL/dh = dL/dh_new).
-        return out.detach()
+        return self.out_proj(core_attn_out)
 
 
 # ---------------------------------------------------------------------------
